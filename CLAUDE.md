@@ -32,8 +32,10 @@
 
 ## 数据集（已就绪，2026-09-06）
 
-- `data/raw/`：10 份英文年报 PDF（来自 ERC2 比赛语料，sha1 命名，不进 git）
-  - 5 份来自 IlyaRice 测试集 + 5 份来自官方 trustbit/enterprise-rag-challenge 的 round2/samples
+- `data/raw/`：10 份英文年报 PDF（来自 ERC2 比赛语料，不进 git），已按公司名重命名
+  - 5 份来自 IlyaRice 测试集（Holley、Tradition、TSX_Y、Mercia、CrossFirst）
+  - 5 份来自官方 trustbit round2/samples（Global Medical REIT、Zegona、TD SYNNEX、Air Products、Sandwell Aquatics）
+- `data/pdf_metadata.csv`：sha1 ↔ 公司名 ↔ 文件名映射（含币种/行业），解析时把公司名注入元信息用
 - `data/questions_test_set.json`：5 个问题（对应 IlyaRice 测试集 5 份 PDF，无标准答案）
 - `data/questions_round2.json`：40 个问题（对应官方 samples 20 份 PDF，含 schema 类型）
 - 机器有 NVIDIA GPU；年报语言为英文 → 解析器跟原项目用 Docling（OCR 配英文）

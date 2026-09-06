@@ -1,0 +1,11 @@
+sha1,company,filename,source,currency,industry
+194000c9109c6fa628f1fed33b44ae4c2b8365f4,Holley Inc.,Holley_Inc.pdf,test_set,USD,Automotive
+2779336b845a41544348abb7b3e6e5bd2ff893a2,Tradition,Tradition.pdf,test_set,CHF,Financial Services
+9d7a72445aba6860402c3acce75af02dc045f74d,TSX_Y,TSX_Y.pdf,test_set,USD,Media & Entertainment
+ac9aa244462c80705c3ff046542c02c459989742,Mercia Asset Management PLC,Mercia_Asset_Management_PLC.pdf,test_set,GBP,Financial Services
+e2b19d2cc2ccab2fd9022326b56b38fb0e772e73,CrossFirst Bank,CrossFirst_Bank.pdf,test_set,USD,Financial Services
+053b7cb83115789346e2a9efc7e2e640851653ff,Global Medical REIT Inc.,Global_Medical_REIT_Inc.pdf,round2_samples,,
+3696c1b29566acc1eafc704ee5737fb3ae6f3d1d,Zegona Communications plc,Zegona_Communications_plc.pdf,round2_samples,,
+4b525836a5d7cb75489f6d93a3b1cf2b8f039bf2,TD SYNNEX,TD_SYNNEX.pdf,round2_samples,,
+d81bbc64a4160b9946fea7a895f80e6201f52f27,Air Products,Air_Products.pdf,round2_samples,,
+608c5097dfc6e83505fd2259ad862dcec11a3f96,Sandwell Aquatics Centre,Sandwell_Aquatics_Centre.pdf,round2_samples,,
