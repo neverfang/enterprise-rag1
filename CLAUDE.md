@@ -27,5 +27,13 @@
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：项目刚初始化，尚未开始第 1 步。**
+**当前位置：数据集已就绪，准备开始第 2 步（PDF 解析，选型已定为 Docling）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 数据集（已就绪，2026-09-06）
+
+- `data/raw/`：10 份英文年报 PDF（来自 ERC2 比赛语料，sha1 命名，不进 git）
+  - 5 份来自 IlyaRice 测试集 + 5 份来自官方 trustbit/enterprise-rag-challenge 的 round2/samples
+- `data/questions_test_set.json`：5 个问题（对应 IlyaRice 测试集 5 份 PDF，无标准答案）
+- `data/questions_round2.json`：40 个问题（对应官方 samples 20 份 PDF，含 schema 类型）
+- 机器有 NVIDIA GPU；年报语言为英文 → 解析器跟原项目用 Docling（OCR 配英文）
