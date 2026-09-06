@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+
+# 环境与密钥
+.env
+
+# 数据：原始 PDF 与中间产物不进 git（test_set 除外）
+data/raw/*
+!data/raw/.gitkeep
+data/parsed/*
+!data/parsed/.gitkeep
+
+# Claude Code 本地配置
+.claude/settings.local.json
+
+# 系统
+Thumbs.db
+.DS_Store

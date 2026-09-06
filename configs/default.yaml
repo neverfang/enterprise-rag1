@@ -1,0 +1,28 @@
+# 命名实验配置：切换不同组合做消融实验
+# （对应原项目的 max_nst_o3m / gemini_thinking 等命名配置思路）
+
+parsing:
+  engine: docling          # PDF 解析引擎
+  table_mode: accurate     # docling 表格识别模式
+
+chunking:
+  max_chars: 1200          # 子块上限（检索粒度）
+  overlap_chars: 150
+  parent_max_chars: 3000   # 父块上限（送入 LLM 的上下文粒度）
+
+indexing:
+  embedding_model: text-embedding-3-small
+  batch_size: 64
+
+retrieval:
+  top_k: 20                # 初检子块数
+  parent_window: 1         # 命中子块向外扩展的父块数
+
+reranking:
+  enabled: true
+  model: gpt-4o-mini
+  top_n: 8                 # 重排序后保留的块数
+
+generation:
+  model: gpt-4o-mini
+  temperature: 0.0
