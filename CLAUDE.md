@@ -32,10 +32,14 @@
 
 ## 数据集（已就绪，2026-09-06）
 
-- `data/raw/`：10 份英文年报 PDF（来自 ERC2 比赛语料，不进 git），已按公司名重命名
+- `data/raw/dev/`：10 份英文年报 PDF，开发/冒烟集（不进 git），已按公司名重命名
   - 5 份来自 IlyaRice 测试集（Holley、Tradition、TSX_Y、Mercia、CrossFirst）
   - 5 份来自官方 trustbit round2/samples（Global Medical REIT、Zegona、TD SYNNEX、Air Products、Sandwell Aquatics）
-- `data/pdf_metadata.csv`：sha1 ↔ 公司名 ↔ 文件名映射（含币种/行业），解析时把公司名注入元信息用
-- `data/questions_test_set.json`：5 个问题（对应 IlyaRice 测试集 5 份 PDF，无标准答案）
-- `data/questions_round2.json`：40 个问题（对应官方 samples 20 份 PDF，含 schema 类型）
+- `data/raw/eval/`：100 份英文年报 PDF（504 MB），官方 round2 最终评测语料（不进 git）
+- `data/pdf_metadata.csv`：110 行 sha1 ↔ 公司名 ↔ 文件名映射（filename 相对 data/raw/，含 split 来源/币种/行业），解析时把公司名注入元信息用
+- `data/questions_test_set.json`：5 题（dev 用，无标准答案）
+- `data/questions_round2.json`：40 题（dev 的 round2 samples 部分用，无标准答案）
+- `data/questions_eval.json`：100 题（评测集，官方最终题）
+- `data/answers_eval.json`：100 条人工校对标准答案（49 条带 reference_pools 出处池；45 条答案含 N/A——故意的不可答题，考系统不编造）
+- `data/answers_baseline_o3mini.json`：获奖系统提交（100 条，带 references 和完整 reasoning_process，可作对比基线）
 - 机器有 NVIDIA GPU；年报语言为英文 → 解析器跟原项目用 Docling（OCR 配英文）
