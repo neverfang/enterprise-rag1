@@ -7,6 +7,9 @@ license = { text = "MIT" }
 requires-python = ">=3.10,<3.13"
 dependencies = [
     "mineru[core]>=2.0,<3.0",
+    "openai>=1.40",
+    "python-dotenv>=1.0,<2.0",
+    "pydantic>=2.7,<3.0",
 ]
 
 [project.optional-dependencies]

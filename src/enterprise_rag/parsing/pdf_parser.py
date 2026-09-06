@@ -62,7 +62,7 @@ def _run_mineru(pdf_path: Path, work_dir: Path) -> list[dict]:
     ]
     env = {**os.environ, "MINERU_MODEL_SOURCE": "modelscope"}
     proc = subprocess.run(
-        cmd, capture_output=True, timeout=PER_PDF_TIMEOUT, env=env,
+        cmd, capture_output=True, timeout=PER_PDF_TIMEOUT, env=env, check=False,
         encoding="utf-8", errors="replace",  # MinerU 输出 UTF-8，中文 Windows 默认 GBK 会解码失败
     )
     if proc.returncode != 0:
@@ -179,7 +179,7 @@ def parse_and_export(pdf_paths: list[Path], out_dir: Path,
             continue
         try:
             report = parse_pdf(pdf, work_dir / pdf.stem, company=lookup.get(pdf.name))
-        except Exception as e:  # 单个失败不中断整批
+        except Exception as e:  # noqa: BLE001 —— 单个 PDF 失败不中断整批
             print(f"[FAIL] {pdf.name}: {e}")
             continue
         out.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")

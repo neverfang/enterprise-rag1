@@ -19,7 +19,7 @@
 
 - [x] 1. Python 项目配置：pyproject / 依赖管理 / 目录结构（uv + venv 3.12）
 - [x] 2. PDF 解析（MinerU pipeline，封装在 src/enterprise_rag/parsing/pdf_parser.py）
-- [ ] 3. 解析产物整理与表格序列化
+- [x] 3. 解析产物整理与表格序列化（src/enterprise_rag/processing/，DeepSeek）
 - [ ] 4. 文本切分（原项目用父文档策略）
 - [ ] 5. 嵌入与索引
 - [ ] 6. 检索（向量检索 + 父文档回溯）
@@ -27,8 +27,23 @@
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 2 步完成（dev 集 10 份已解析），准备开始第 3 步（解析产物整理与表格序列化）。**
+**当前位置：第 3 步完成（dev 873 表全部序列化），准备开始第 4 步（文本切分，父文档策略）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 序列化阶段结果（第 3 步完成，2026-09-07）
+
+- dev 集 873/873 表全部序列化，共 **6,262 个上下文独立信息块**（平均 7.2 块/表）
+- 产物：`data/parsed/serialized/*.json`（在 docs 基础上：文本规范化 + 每表挂 `serialized`
+  字段：`{subject_core_entities_list, relevant_headers_list, information_blocks[]}`）
+- 做法：同页前后正文 + 表格 HTML + 公司名注入 → DeepSeek（temp=0，json_object 模式
+  + pydantic 校验 + 3 次重试），忠实参考 IlyaRice tables_serialization.py
+- 规范化顺带修复：fi/fl 连字断痕（"fi scal"→"fiscal"）、控制字符、零宽字符
+- 超大表（>50 行或 html>12KB）追加"合并行压缩块数"指令，避免 max_tokens=8192 截断
+  （dev 集仅 2 张此类表，Global_Medical_REIT t45/t50）
+- 断点续跑按**表粒度**；总成本约 ¥5（~1.1M 入 + ~1.0M 出 tokens），全程 ~8 分钟
+- 复跑/续跑：`.venv\Scripts\python.exe -m enterprise_rag.processing.table_serializer`
+  （默认 data/parsed/docs → data/parsed/serialized；--limit 冒烟）
+- LLM 配置在 `.env`（DEEPSEEK_API_KEY / LLM_BASE_URL / LLM_MODEL，不进 git）
 
 ## 解析阶段结果（第 2 步完成，2026-09-06）
 
