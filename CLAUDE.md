@@ -17,8 +17,8 @@
 
 ## 开发路线图（参考原项目流水线，按序推进）
 
-- [ ] 1. Python 项目配置：pyproject / 依赖管理 / 目录结构
-- [ ] 2. PDF 解析（原项目用 Docling，届时讨论选型）
+- [x] 1. Python 项目配置：pyproject / 依赖管理 / 目录结构（uv + venv 3.12）
+- [ ] 2. PDF 解析（MinerU pipeline，封装在 src/enterprise_rag/parsing/pdf_parser.py）
 - [ ] 3. 解析产物整理与表格序列化
 - [ ] 4. 文本切分（原项目用父文档策略）
 - [ ] 5. 嵌入与索引
@@ -42,4 +42,10 @@
 - `data/questions_eval.json`：100 题（评测集，官方最终题）
 - `data/answers_eval.json`：100 条人工校对标准答案（49 条带 reference_pools 出处池；45 条答案含 N/A——故意的不可答题，考系统不编造）
 - `data/answers_baseline_o3mini.json`：获奖系统提交（100 条，带 references 和完整 reasoning_process，可作对比基线）
-- 机器有 NVIDIA GPU；年报语言为英文 → 解析器跟原项目用 Docling（OCR 配英文）
+- 机器有 NVIDIA GPU（RTX 4060 Laptop 8GB）；年报语言为英文
+- **解析器选型：MinerU pipeline 后端**（用户选定；原项目用 Docling，想对比时评测集现成）
+- 环境：`.venv` = Python 3.12（uv 管理；MinerU 在 Windows 要求 3.10–3.12），
+  安装用清华镜像，模型下载走 modelscope（MINERU_MODEL_SOURCE=modelscope）
+- **GPU 加速**：mineru[core] 默认装 CPU 版 torch；装完依赖后需再执行
+  `uv pip install -p .venv\Scripts\python.exe --index-url https://download.pytorch.org/whl/cu126 torch torchvision`
+  覆盖为 CUDA 版，MinerU 检测到 CUDA 后自动用 GPU（RTX 4060 8GB）
