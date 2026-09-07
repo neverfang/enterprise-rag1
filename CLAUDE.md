@@ -25,11 +25,46 @@
 - [x] 5. 嵌入与索引（src/enterprise_rag/indexing/ingestor.py，硅基流动 bge-m3 + FAISS + BM25）
 - [x] 6. 检索（src/enterprise_rag/retrieval/retriever.py，路由 + 向量/BM25 双路融合 + 父文档回溯）
 - [x] 7. LLM 重排序（src/enterprise_rag/reranking/reranker.py，DeepSeek 逐块打分 + combined 0.7/0.3）
-- [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
+- [x] 8. 答案生成（src/enterprise_rag/generation/generator.py，题型化 schema + CoT + 弱证据提示）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 7 步完成（dev 集 5 题重排冒烟通过），准备开始第 8 步（答案生成）。**
+**当前位置：第 8 步完成（dev 集 5 题端到端生成冒烟通过），准备开始第 9 步（端到端串联与评测）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 生成阶段结果（第 8 步完成，2026-09-08）
+
+- 模块 `src/enterprise_rag/generation/generator.py`：`Generator.answer()`——
+  父文档上下文 + 题型化提示词 -> `{step_by_step_analysis, reasoning_summary,
+  relevant_pages, final_answer}`；CLI 串全链路（路由->融合->重排->父文档->生成）
+- **题型化 schema**（题目 json 的 `kind` 字段路由，eval 100 题分布
+  number 58 / boolean 24 / names 9 / name 9）：忠实原版 4 套
+  AnswerWithRAGContext*Prompt——number 的严格规则全保留（单位
+  thousands/millions 换算、括号=负数、币种不符->N/A、**拒绝计算推导**、
+  度量概念必须精确匹配）；上下文格式 `Text retrieved from page {N}`
+  是 relevant_pages 的页号锚点，同原版
+- **relevant_pages 校验**（同原版 _validate_page_references）：只保留
+  上下文实际提供的页（防幻觉页码），不足 2 页按重排序补足、至多 8 页
+- **弱证据提示注入**（我们的，原版没有）：第 7 步发现可答题 top 重排分
+  0.9-1.0、弱证据题 <=0.7——top 分 <=0.5 时 system 追加"证据可能不足，
+  认真考虑 N/A"。**是参考不是门槛**（Mercia 0.6 未触发、照常作答且对）
+- 上下文 60K 字符保险丝（超限丢靠后的页）；CLI `--kind auto` 简易猜题
+  （正式批量读 json 的 kind）
+- 冒烟（dev 5 题，全链路）：
+  - Tradition(number) -> **9.9**：p45 表里三个 margin 变体（adjusted
+    underlying 12.7 / adjusted 11.4 / reported 9.9）中按"题目无限定词取
+    reported"正确选中；引用页 [45, 74] 真实
+  - 三个 boolean -> True：TSX_Y（NCIB 2021-08 宣布 + Plan of Arrangement
+    2022-08 董事会批准）；Holley（5 页收购明细，CoT 逐一列举 Baer/Simpson/
+    Drake 等）；**Mercia 父文档救回**——chunk 级检索平淡，但整页上下文含
+    "acquisition of the VCT fund management business"（p42/p78），
+    之前"疑似不可答"判断被推翻，父文档回溯价值实证
+  - CrossFirst(number) -> **N/A**：top 分 0.4 触发弱证据提示，正确识别
+    "全员工薪酬 ≠ 高管薪酬（SCT 在 proxy statement）"；风险：高管表
+    曾在融合 #6，重排未进 top6——真伪留给第 9 步评测
+- 成本：全链路（重排+生成）~13-32K 入 tokens/题（约 ¥0.02-0.05），
+  100 题 ¥2-5
+- 复跑：`.venv\Scripts\python.exe -m enterprise_rag.generation.generator "问题"`
+  （--kind auto|name|names|number|boolean --top-n 6 --weak-th 0.5）
 
 ## 重排阶段结果（第 7 步完成，2026-09-08）
 
