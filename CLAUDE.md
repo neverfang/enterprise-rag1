@@ -28,8 +28,31 @@
 - [x] 8. 答案生成（src/enterprise_rag/generation/generator.py，题型化 schema + CoT + 弱证据提示）
 - [x] 9. 端到端串联与冒烟测试（src/enterprise_rag/pipeline.py + evaluate.py，dev 验证通过）
 
-**当前位置：第 9 步 dev 验证完成（pipeline + 评测脚本就绪，基线参照分 81.0%）。下一步：eval 100 份全量数据处理（解析 ~8h GPU -> 序列化 -> 建索引），再正式跑 100 题评测。**
+**当前位置：9 步全部完成 + 数据优化与仓库清理完成（2026-09-08，README 重写为成果报告）。eval 100 份全量与正式评测未跑（用户暂停）；如需续跑：`bash run_eval_prep.sh`（五阶段链式、断点续跑，已解析 5/100）→ `python -m enterprise_rag.pipeline data/questions_eval.json --out data/answers_run_eval.json`。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 数据优化与仓库清理（2026-09-08）
+
+- **瑕疵审计三连（全部"不修"有据）**：
+  - 单格双数值退化表（无边框挤压，15 份文档 226 张命中）：抽查 4 张
+    （CrossFirst t53 / Air_Products t47 / Tradition t40 / Holley t5），序列化
+    LLM 均已正确按年度归属两值（如 "For 2022, $26,150 thousand; for 2021, …"）
+    ——第 2 步"数值未丢失、LLM 仍可读"的判断在序列化层面验证，不重序列化
+  - 跨页续表：宽松判据 70 候选 -> 严格判据（相邻+次页+行宽众数一致）7 候选
+    -> 逐对看行内容 **0 真断表**（Air_Products 49 行季度表整表完整 = MinerU
+    自行合并跨页表的证据；7 候选里 GMREIT t26→27 租赁负债/资产两半、
+    CrossFirst t54→55 相邻节均各自自含主题）——不引入合并逻辑（误合并风险
+    大于零收益）
+  - 唯一修复：`retriever.parent_context` els_window 模式加 `max_chars` 预算
+    （默认 60K 对齐生成端保险丝），超预算**窗口减半重建**而非丢段（保住全部
+    候选邻域）；w=0 仍超由调用方兜底。验证：Tradition 题 W=15 3 段 36.7K
+    全窗保留；预算压到 10K 时 15→0 逐级减半、5 段 16.3K 全候选保留
+    （commit edddb5c）
+- **数据文件清理（commit 7931a21）**：questions_round2.json 去 Ethernity 重复题
+  （40→39，两条完全一致）；answers_eval.json 核验 answers 已是真 list 无需转、
+  补末行换行；test_set/questions_eval 无重复；pdf_metadata 110 行 sha1/公司零重复
+- **README.md 重写为成果报告**（流水线表/设计决策忠实vs超出/结果含基线 81.0%
+  参照/快速开始/成本/局限与后续/结构树）；run_eval_prep.sh 纳入 git（续跑文档）
 
 ## 端到端阶段结果（第 9 步 dev 验证完成，2026-09-08）
 
@@ -146,7 +169,8 @@
     元素（默认 15）从内容流拼文本（标题#/表序列化块/vl 转写），相邻区间
     合并——跨页的语义连续段落不被页边界切断
   - 冒烟观察：W=15 时 6 块 → 4 段 90K 字符，比 pages（33K）大不少，
-    **W 与上下文预算的权衡留到第 9 步调**
+    **W 与上下文预算的权衡已兑现（2026-09-08）：max_chars 预算 + 窗口减半重建，
+    见"数据优化与仓库清理"章节**
 - 冒烟（dev 测试集 5 题）：路由 5/5；Tradition 利润率题融合 #1+#2 恰好 =
   收入表(v=1.0) + 利润调节表(b=1.0)（两路各自的 best 被融合到顶部，
   算 margin 正好都要）；Holley M&A 题 #1 双路满分；Mercia M&A 题召回平淡，
@@ -263,7 +287,8 @@
   （仅作 ID）；两份文档 149 张表已用正确公司名重序列化（旧名在信息块中出现 0 次）。
   官方 100 题不涉及这两家；dev 陷阱题（问 "Sandwell Aquatics Centre" 的 R&D/COO）正确答案仍为 N/A
 - `data/questions_test_set.json`：5 题（dev 用，无标准答案）
-- `data/questions_round2.json`：40 题（dev 的 round2 samples 部分用，无标准答案）
+- `data/questions_round2.json`：39 题（dev 的 round2 samples 部分用，无标准答案；
+  原始 40 题含 1 道 Ethernity 重复，2026-09-08 去重）
 - `data/questions_eval.json`：100 题（评测集，官方最终题）
 - `data/answers_eval.json`：100 条人工校对标准答案（49 条带 reference_pools 出处池；45 条答案含 N/A——故意的不可答题，考系统不编造）
 - `data/answers_baseline_o3mini.json`：获奖系统提交（100 条，带 references 和完整 reasoning_process，可作对比基线）
