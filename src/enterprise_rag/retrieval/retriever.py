@@ -9,13 +9,16 @@
   BM25 补精确词/数字。融合 = 各路分数在自身 top-k 内 min-max 归一化后加权，
   缺失路记 0（偏向两路都命中的块；只命中一路的仍能进候选池交给重排）
 - 父文档回溯：独立接口 parent_context()，供第 7 步重排后调用。两种模式：
-  - pages（同原版）：chunk -> 所在页整页文本，按页去重
+  - pages（同原版，pipeline 默认）：chunk -> 所在页整页文本，按页去重
   - els_window：用 chunk 的 els 元素区间向两侧扩 window 个元素、从内容流拼文本，
-    相邻区间合并去重——跨页的语义连续段落不被页边界切断（第 4 步预留的钩子）
+    相邻区间合并去重——跨页的语义连续段落不被页边界切断（第 4 步预留的钩子）。
+    总字符超 max_chars（默认 60K，对齐生成端保险丝）时窗口减半重建而非丢段，
+    保住所有候选的邻域；减到 window=0 仍超（极端：多个超大表块）由调用方兜底
 
 用法（冒烟）：
     python -m enterprise_rag.retrieval.retriever "问题" \
         [--k 30] [--vw 0.6] [--top-n 20] [--parent pages|els_window] [--window 15]
+        [--max-chars 60000]
 """
 
 from __future__ import annotations
@@ -154,12 +157,15 @@ class Retriever:
     # ---------- 父文档回溯 ----------
 
     def parent_context(self, doc_id: str, candidates: list[dict],
-                       mode: str = "pages", window: int = 15) -> list[dict]:
+                       mode: str = "pages", window: int = 15,
+                       max_chars: int = 60_000) -> list[dict]:
         """候选 chunks -> 父文本列表（去重保序）。第 7 步重排后对 top 候选调用。
 
         - pages：chunk 所在页整页文本，按页去重（同原版 return_parent_pages）
         - els_window：els 区间向两侧扩 window 个元素、内容流拼文本，
-          相邻/重叠区间合并（跨页语义连续，第 4 步钩子）
+          相邻/重叠区间合并（跨页语义连续，第 4 步钩子）；总字符超 max_chars
+          时 window 减半重建（全部候选邻域都在，只是变窄），减到 0 仍超
+          （多个超大表块挤进 top）则原样返回、由调用方保险丝兜底
         """
         d = self._doc(doc_id)
         if mode == "pages":
@@ -173,19 +179,29 @@ class Retriever:
                 out.append({"page": p, "text": d["pages"][p]["text"]})
             return out
         if mode == "els_window":
-            spans = []
-            for c in candidates:
-                s, e = c["els"]
-                spans.append([max(0, s - window), e + window])
-            spans.sort()
-            merged: list[list[int]] = []
-            for s, e in spans:  # 合并重叠/相邻区间
-                if merged and s <= merged[-1][1]:
-                    merged[-1][1] = max(merged[-1][1], e)
-                else:
-                    merged.append([s, e])
-            return [{"els": [s, e], "text": self._elements_text(doc_id, s, e)}
-                    for s, e in merged]
+
+            def build(w: int) -> list[list[int]]:
+                spans = []
+                for c in candidates:
+                    s, e = c["els"]
+                    spans.append([max(0, s - w), e + w])
+                spans.sort()
+                merged: list[list[int]] = []
+                for s, e in spans:  # 合并重叠/相邻区间
+                    if merged and s <= merged[-1][1]:
+                        merged[-1][1] = max(merged[-1][1], e)
+                    else:
+                        merged.append([s, e])
+                return merged
+
+            w = window
+            merged = build(w)
+            texts = [self._elements_text(doc_id, s, e) for s, e in merged]
+            while w > 0 and sum(len(t) for t in texts) > max_chars:
+                w //= 2
+                merged = build(w)
+                texts = [self._elements_text(doc_id, s, e) for s, e in merged]
+            return [{"els": [s, e], "text": t} for (s, e), t in zip(merged, texts)]
         raise ValueError(f"未知父文档模式: {mode}")
 
     def _elements_text(self, doc_id: str, lo: int, hi: int) -> str:
@@ -230,6 +246,8 @@ def main() -> None:
     ap.add_argument("--top-n", type=int, default=20, help="融合候选输出条数")
     ap.add_argument("--parent", choices=["pages", "els_window"], default="pages")
     ap.add_argument("--window", type=int, default=15, help="els_window 两侧扩展元素数")
+    ap.add_argument("--max-chars", type=int, default=60_000,
+                    help="els_window 总字符预算（超出则窗口减半重建）")
     ap.add_argument("--show", type=int, default=10, help="打印融合 top 几")
     args = ap.parse_args()
 
@@ -262,12 +280,14 @@ def main() -> None:
         print(f" {i:2d}. s={c['score']:.3f} v={c['score_vec']:.2f} b={c['score_bm25']:.2f} "
               f"[{c['type']}:p{c['page']}] {_snippet(c['text'])}", flush=True)
 
-    parents = r.parent_context(doc_id, cands[:6], mode=args.parent, window=args.window)
+    parents = r.parent_context(doc_id, cands[:6], mode=args.parent,
+                               window=args.window, max_chars=args.max_chars)
     total = sum(len(p["text"]) for p in parents)
     where = [f"p{p['page']}" for p in parents] if args.parent == "pages" \
-        else [f"els{p['els']}" for p in parents]
+        else [f"els{p['els']}({len(p['text'])})" for p in parents]
+    budget = f"，预算 {args.max_chars}" if args.parent == "els_window" else ""
     print(f"\n== 父文档（top6 chunks -> {args.parent}，{len(parents)} 段共 "
-          f"{total} 字符）: {' '.join(where)} ==", flush=True)
+          f"{total} 字符{budget}）: {' '.join(where)} ==", flush=True)
     if parents:
         print(_snippet(parents[0]["text"], 200), flush=True)
 
