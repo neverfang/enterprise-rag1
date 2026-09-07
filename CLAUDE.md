@@ -24,12 +24,43 @@
 - [x] 4. 文本切分（src/enterprise_rag/processing/text_splitter.py，chunk + 页父文本 + els 区间）
 - [x] 5. 嵌入与索引（src/enterprise_rag/indexing/ingestor.py，硅基流动 bge-m3 + FAISS + BM25）
 - [x] 6. 检索（src/enterprise_rag/retrieval/retriever.py，路由 + 向量/BM25 双路融合 + 父文档回溯）
-- [ ] 7. LLM 重排序
+- [x] 7. LLM 重排序（src/enterprise_rag/reranking/reranker.py，DeepSeek 逐块打分 + combined 0.7/0.3）
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 6 步完成（dev 集 5 题路由+融合冒烟通过），准备开始第 7 步（LLM 重排序）。**
+**当前位置：第 7 步完成（dev 集 5 题重排冒烟通过），准备开始第 8 步（答案生成）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 重排阶段结果（第 7 步完成，2026-09-08）
+
+- 模块 `src/enterprise_rag/reranking/reranker.py`：`Reranker`（融合 top-20 →
+  DeepSeek 逐块相关性打分 → combined 排序取 top-6）；CLI 串联 Router +
+  Retriever + Reranker 全链路
+- **忠实原版的配方**：0-1 锚点量表 prompt（0.1 步进、每档文字定义）、
+  `Block N` 多块格式 + "exactly N rankings, in order"、
+  combined = 0.7×LLM + 0.3×检索分、缺分兜底 0.0。两处替换：模型
+  deepseek-chat（json_object + pydantic 校验，同 table_serializer 模式）；
+  加权项用第 6 步**融合分**替代原版的向量 distance（方向一致且含双路信息）
+- **批量 10 块/prompt**（原版调用处 2 块/prompt）：同题对比 top-3 成员一致，
+  批内有对照打分反而更稳（明写 margin 的表 1.0 vs 待计算表 0.9；batch=2
+  孤立打分同表只给 0.4），tokens 7.9K vs 12.6K、请求数 2 vs 10（系统提示
+  不再重复 10 次）——批内互相干扰的担忧未成立
+- 每块截断 cap=1,500 tok（表块最大 5.7K）：只影响重排输入，第 8 步生成
+  仍用完整块/父文档；数量不符/JSON 越界重试 3 次，耗尽才兜底 0 分（冒烟
+  5 题 × ~30 块零兜底触发）
+- 冒烟（dev 5 题）：
+  - Tradition：p45 利润调节表 #2→#1（表里**明写 margin 9.9%/8.4%**，比要
+    自己算的收入表更直接）
+  - TSX_Y：融合 **#20** 的股东信 → 重排 #1（$100M repurchase/NCIB）——
+    top-20 全量送重排的价值证明；Plan of Arrangement 细节块被降权
+    （描述过往交易 ≠ 宣布计划）
+  - Holley：融合 #18 goodwill 变动表 → #3（llm=1.0）、#4 Acquisitions
+    章节 → #1；Mercia/CrossFirst 最高 LLM 分仅 0.7/0.4
+  - **可答性信号**：可答题 top LLM 分 0.9-1.0，弱证据题 ≤0.7——第 8 步
+    N/A 判断可用
+- 成本：~7-20K 入 / ~1K 出 tokens/题（约 ¥0.01-0.02），100 题约 ¥1-2
+- 复跑：`.venv\Scripts\python.exe -m enterprise_rag.reranking.reranker "问题"`
+  （--batch 10 --llm-w 0.7 --top-n 6 --cap 1500；--batch 2 切回原版粒度对比）
 
 ## 检索阶段结果（第 6 步完成，2026-09-07）
 
