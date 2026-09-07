@@ -20,6 +20,7 @@
 - [x] 1. Python 项目配置：pyproject / 依赖管理 / 目录结构（uv + venv 3.12）
 - [x] 2. PDF 解析（MinerU pipeline，封装在 src/enterprise_rag/parsing/pdf_parser.py）
 - [x] 3. 解析产物整理与表格序列化（src/enterprise_rag/processing/，DeepSeek）
+- [x] 3.5 图片多模态序列化（deepseek-v4-flash-vision-exp，src/enterprise_rag/processing/image_serializer.py）
 - [ ] 4. 文本切分（原项目用父文档策略）
 - [ ] 5. 嵌入与索引
 - [ ] 6. 检索（向量检索 + 父文档回溯）
@@ -27,8 +28,26 @@
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 3 步完成（dev 873 表全部序列化），准备开始第 4 步（文本切分，父文档策略）。**
+**当前位置：第 3.5 步完成（dev 197 图全部分类、41 张数据图转写），准备开始第 4 步（文本切分，父文档策略）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 图片序列化阶段结果（第 3.5 步完成，2026-09-07）
+
+- dev 集 **197/197 图片全部处理、0 失败**；41 张（21%）携带数据（图表/表图/信息图）
+  完成文字转写，其余 156 张（照片/logo）只留分类标记
+- 产物：`data/parsed/serialized/*.json` 的 picture 元素挂 `vl` 字段：
+  `{type, data(HAS_DATA/NO_DATA), text(转写文本，NO_DATA 为空), img(裁剪图相对路径)}`
+- 审计先行（同日）：全量轻量分类摸清分布；img_path 与内容流 picture 元素按
+  **顺序位置**对齐（content_list 的 image 条目 ↔ content 流，10/10 文档验证）
+- 做法：两阶段——①轻量分类（严格两行格式，**显式关 thinking**）；②仅 HAS_DATA
+  做完整转写：只转写图上**印出的数字**（禁止按网格线估值，实测模型会"估"出
+  似是而非的值且会遵守此禁令），公司名 + caption + 同页前后文注入
+- 模型：`deepseek-v4-flash-vision-exp`（.env 的 `LLM_VISION_MODEL`，key/base_url 复用）。
+  坑：这是混合推理模型，thinking 开着且 max_tokens 小时会返回**空 content**（分类阶段
+  因此必须关 thinking）
+- 成本：全量 ~90K 入/~51K 出 tokens（**<¥1**），8 并发约 2 分钟；eval 100 份外推约 ¥5
+- 复跑/续跑：`.venv\Scripts\python.exe -m enterprise_rag.processing.image_serializer`
+  （已带 vl 字段的图自动跳过；--limit 冒烟）
 
 ## 序列化阶段结果（第 3 步完成，2026-09-07）
 
