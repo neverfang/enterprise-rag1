@@ -32,6 +32,7 @@ import json
 import sys
 import time
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -158,7 +159,9 @@ class NumberAnswer(_Common):
 
 
 class BooleanAnswer(_Common):
-    final_answer: bool
+    # 原版只收 bool（题目模板要求无证据回 False）；但弱证据提示会引导模型
+    # 回 'N/A'——schema 与提示必须自洽，否则重试 3 次全挂（round2 冒烟踩过）
+    final_answer: bool | Literal["N/A"]
 
 
 SCHEMAS: dict[str, type[BaseModel]] = {

@@ -26,10 +26,40 @@
 - [x] 6. 检索（src/enterprise_rag/retrieval/retriever.py，路由 + 向量/BM25 双路融合 + 父文档回溯）
 - [x] 7. LLM 重排序（src/enterprise_rag/reranking/reranker.py，DeepSeek 逐块打分 + combined 0.7/0.3）
 - [x] 8. 答案生成（src/enterprise_rag/generation/generator.py，题型化 schema + CoT + 弱证据提示）
-- [ ] 9. 端到端串联与冒烟测试
+- [x] 9. 端到端串联与冒烟测试（src/enterprise_rag/pipeline.py + evaluate.py，dev 验证通过）
 
-**当前位置：第 8 步完成（dev 集 5 题端到端生成冒烟通过），准备开始第 9 步（端到端串联与评测）。**
+**当前位置：第 9 步 dev 验证完成（pipeline + 评测脚本就绪，基线参照分 81.0%）。下一步：eval 100 份全量数据处理（解析 ~8h GPU -> 序列化 -> 建索引），再正式跑 100 题评测。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 端到端阶段结果（第 9 步 dev 验证完成，2026-09-08）
+
+- `src/enterprise_rag/pipeline.py`：批量问答入口。题目字段自适应
+  （text|question、kind|schema）；**断点续跑**（输出里无 error 的题跳过，
+  每答完一题即落盘，中断可续）；路由 0 家 -> 快速 N/A（dev 部分建索引时
+  跳过未索引公司，eval 全量后不应发生）；输出含 references
+  （pdf_sha1 + page_index，sha1 来自 pdf_metadata.csv）
+- **比较题三步**（忠实原版 process_comparative_question 流程，prompt 自写）：
+  LLM 改写成每家子问题 -> 各家并行 number 型作答 -> LLM 汇总答原题。
+  冒烟：GMREIT vs Zegona D/E 题三步走通，双 N/A（比率需自行计算，number
+  schema"拒绝推导"的正确行为）；已知边界：另一家未索引的比较题路由只剩
+  1 家、用原题单家检索（eval 100 份全索引后不存在此情况）
+- `src/enterprise_rag/evaluate.py`：自用评分（开发迭代反馈，非官方口径）——
+  number 相对误差 <=1%、boolean 真值、name 规范化后相等/互含、names 集合
+  严格相等（偏严，但双方同一把尺）；gt 的 answers 字段引号风格不一
+  （直/弯/混合），解析带降级链；N/A 题单独统计
+- **基线参照分**（获奖 o3-mini 提交，我们的规则）：**总体 81.0%**
+  （number 86.2 / boolean 87.5 / name 77.8 / names 33.3 /
+  N/A 题 91.1 / 非 N/A 72.7）
+- dev 验证：test_set 5 题（与第 8 步 CLI 答案一致，0 错误）；round2 40 题
+  （7 题可路由含 1 道比较题、33 题路由失败走快速 N/A、输入含 1 道重复题
+  -> 输出 39 条属预期）
+- 冒烟踩的坑：①boolean schema 只收 bool 与弱证据提示（"回 N/A"）自相
+  矛盾，模型回 'N/A' 字符串导致重试 3 次全挂 -> `bool | Literal["N/A"]`；
+  ②续跑最初把 error 行当已答 -> 只收无 error 行
+- 运行产物 answers_run*.json 不进 git（.gitignore）
+- 复跑：`.venv\Scripts\python.exe -m enterprise_rag.pipeline <questions.json>
+  --out <answers_run.json> [--limit N --workers 2]`；评测
+  `python -m enterprise_rag.evaluate <answers_run.json>`
 
 ## 生成阶段结果（第 8 步完成，2026-09-08）
 
