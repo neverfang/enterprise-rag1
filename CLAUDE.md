@@ -23,13 +23,40 @@
 - [x] 3.5 图片多模态序列化（deepseek-v4-flash-vision-exp，src/enterprise_rag/processing/image_serializer.py）
 - [x] 4. 文本切分（src/enterprise_rag/processing/text_splitter.py，chunk + 页父文本 + els 区间）
 - [x] 5. 嵌入与索引（src/enterprise_rag/indexing/ingestor.py，硅基流动 bge-m3 + FAISS + BM25）
-- [ ] 6. 检索（向量检索 + 父文档回溯）
+- [x] 6. 检索（src/enterprise_rag/retrieval/retriever.py，路由 + 向量/BM25 双路融合 + 父文档回溯）
 - [ ] 7. LLM 重排序
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 5 步完成（dev 集 10 份索引就绪），准备开始第 6 步（检索）。**
+**当前位置：第 6 步完成（dev 集 5 题路由+融合冒烟通过），准备开始第 7 步（LLM 重排序）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 检索阶段结果（第 6 步完成，2026-09-07）
+
+- 模块 `src/enterprise_rag/retrieval/retriever.py`：`Router`（问题→doc_id）+
+  `Retriever`（单文档双路召回+融合、`parent_context` 父文档回溯）
+- **路由**：忠实原版正则法——公司名 ∪ 文件名 stem 做词边界匹配
+  （`re.escape(key) + (?:\W|$)`，长键优先），命中即从问题文本删除继续找，
+  天然支持比较题多公司；只路由已建索引的文档。dev 5 题 + 比较场景路由全对
+- **双路融合（方案 B，超出原版）**：原版获奖流水线其实**只走向量 top-28，
+  BM25 建了没用**（读源码纠正了此前的误记）；我们召回 = FAISS top-k +
+  BM25 top-k（默认 k=30），各路分数在自身 top-k 内 min-max 归一化后按
+  vw=0.6 加权求和（某路没进 top-k 记 0，偏向两路都命中的块），融合出
+  top-20 候选——是第 7 步 LLM 重排的输入。升级依据：dev 5 题抽查两路
+  top3 重叠仅 0-1/3（向量补同义词 buyback→repurchase、BM25 补精确词/数字）
+- **父文档回溯 `parent_context`**：两模式可切换——
+  - `pages`（同原版）：chunk 所在页整页文本，按页去重
+  - `els_window`（第 4 步钩子兑现）：chunk 的 els 元素区间两侧各扩 W 个
+    元素（默认 15）从内容流拼文本（标题#/表序列化块/vl 转写），相邻区间
+    合并——跨页的语义连续段落不被页边界切断
+  - 冒烟观察：W=15 时 6 块 → 4 段 90K 字符，比 pages（33K）大不少，
+    **W 与上下文预算的权衡留到第 9 步调**
+- 冒烟（dev 测试集 5 题）：路由 5/5；Tradition 利润率题融合 #1+#2 恰好 =
+  收入表(v=1.0) + 利润调节表(b=1.0)（两路各自的 best 被融合到顶部，
+  算 margin 正好都要）；Holley M&A 题 #1 双路满分；Mercia M&A 题召回平淡，
+  该题疑似不可答题（考第 8 步不编造）
+- 复跑：`.venv\Scripts\python.exe -m enterprise_rag.retrieval.retriever "问题"`
+  （--k 30 --vw 0.6 --top-n 20 --parent pages|els_window --window 15 --show 10）
 
 ## 索引阶段结果（第 5 步完成，2026-09-07）
 
