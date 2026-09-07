@@ -66,6 +66,12 @@
   - 5 份来自官方 trustbit round2/samples（Global Medical REIT、Zegona、TD SYNNEX、Air Products、Sandwell Aquatics）
 - `data/raw/eval/`：100 份英文年报 PDF（504 MB），官方 round2 最终评测语料（不进 git）
 - `data/pdf_metadata.csv`：110 行 sha1 ↔ 公司名 ↔ 文件名映射（filename 相对 data/raw/，含 split 来源/币种/行业），解析时把公司名注入元信息用
+- **公司名别名修正（2026-09-07，多模态审计时发现）**：两份 dev 文档曾按文件名误标——
+  `Sandwell_Aquatics_Centre.pdf` 实为 **Billington Holdings plc** FY2022 年报（"水上运动中心"
+  是其承建的钢结构项目，报告里只是项目照片）；`TSX_Y.pdf` 实为 **Yellow Pages Limited**
+  （文件名来自 TSX 代码 Y）。csv 与 docs/serialized 的 company 已改，文件名/doc_id 保持不动
+  （仅作 ID）；两份文档 149 张表已用正确公司名重序列化（旧名在信息块中出现 0 次）。
+  官方 100 题不涉及这两家；dev 陷阱题（问 "Sandwell Aquatics Centre" 的 R&D/COO）正确答案仍为 N/A
 - `data/questions_test_set.json`：5 题（dev 用，无标准答案）
 - `data/questions_round2.json`：40 题（dev 的 round2 samples 部分用，无标准答案）
 - `data/questions_eval.json`：100 题（评测集，官方最终题）
