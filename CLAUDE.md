@@ -22,14 +22,42 @@
 - [x] 3. 解析产物整理与表格序列化（src/enterprise_rag/processing/，DeepSeek）
 - [x] 3.5 图片多模态序列化（deepseek-v4-flash-vision-exp，src/enterprise_rag/processing/image_serializer.py）
 - [x] 4. 文本切分（src/enterprise_rag/processing/text_splitter.py，chunk + 页父文本 + els 区间）
-- [ ] 5. 嵌入与索引
+- [x] 5. 嵌入与索引（src/enterprise_rag/indexing/ingestor.py，硅基流动 bge-m3 + FAISS + BM25）
 - [ ] 6. 检索（向量检索 + 父文档回溯）
 - [ ] 7. LLM 重排序
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 4 步完成（dev 集 4,694 chunks），准备开始第 5 步（嵌入与索引）。**
+**当前位置：第 5 步完成（dev 集 10 份索引就绪），准备开始第 6 步（检索）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 索引阶段结果（第 5 步完成，2026-09-07）
+
+- dev 集 10 份 → `data/indexes/`（不进 git）：每文档一对 `{doc}.faiss` +
+  `{doc}.pkl`，外加 `index_meta.json`（模型/维度/时间/每文档 chunk 数，供
+  A/B 目录区分与陈旧检测）。dev 全量 **1.24M token、18 秒**建完（免费）
+- 嵌入模型：**硅基流动 BAAI/bge-m3**（免费档 2,000 RPM / 500K TPM；固定 1024 维，
+  **不支持 dimensions 参数**——传了报 400 code 20015）。`.env` 配
+  `EMBED_API_KEY / EMBED_BASE_URL / EMBED_MODEL`；百炼 `DASHSCOPE_API_KEY`
+  留作 text-embedding-v4 A/B 备选（质量更强，¥0.5/M，实测稳定）
+- 向量索引：**FAISS IndexFlatIP**（归一化后内积=余弦，**精确 KNN、召回 100%**），
+  内部序号 == chunk id。刻意不用 ANN/向量数据库：语料静态、单机离线、按公司
+  路由已由"每文档一索引"实现，实验迭代=换 `--out` 目录重跑、A/B 并存（决策
+  讨论 2026-09-07）
+- BM25：rank_bm25 BM25Okapi，语料序同 chunk id；分词保留千分位/小数
+  （"86.6"、"1,234" 整 token，利于数字型查询）
+- 批量 **token 预算制**（32 条 × 3,200 tok/请求双约束）：起因是百炼
+  qwen3.7-text-embedding-flash 有隐藏单请求 ~4.5K token 上限且**超限不报错
+  直接挂死**（排障半天才定位，已弃用该模型）；预算切批对任何隐藏上限都有防御
+- `Embedder` 可复用类（建库与第 6 步查询端共用，保证同模型同维度）；客户端
+  `max_retries=0`（避免与自定义重试叠加拖到十几分钟）+ `trust_env=False`
+  （国内端点直连，绕过 Windows 系统代理）
+- 复跑：`.venv\Scripts\python.exe -m enterprise_rag.indexing.ingestor`
+  （按文档断点续跑；--force 重建；--limit 冒烟；eval 100 份同命令换输入目录，
+  TPM 500K 下预计 ~30 分钟）
+- 抽查（dev 测试集 5 题）：完整性 10/10（ntotal/维度/范数/双路对齐）；双路 top3
+  重叠仅 0-1/3 = 互补性强；向量路补同义词（"buyback"→"Share repurchase" 直命中）、
+  BM25 补精确词，融合价值得到验证
 
 ## 切分阶段结果（第 4 步完成，2026-09-07）
 
