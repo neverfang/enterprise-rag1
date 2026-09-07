@@ -21,15 +21,35 @@
 - [x] 2. PDF 解析（MinerU pipeline，封装在 src/enterprise_rag/parsing/pdf_parser.py）
 - [x] 3. 解析产物整理与表格序列化（src/enterprise_rag/processing/，DeepSeek）
 - [x] 3.5 图片多模态序列化（deepseek-v4-flash-vision-exp，src/enterprise_rag/processing/image_serializer.py）
-- [ ] 4. 文本切分（原项目用父文档策略）
+- [x] 4. 文本切分（src/enterprise_rag/processing/text_splitter.py，chunk + 页父文本 + els 区间）
 - [ ] 5. 嵌入与索引
 - [ ] 6. 检索（向量检索 + 父文档回溯）
 - [ ] 7. LLM 重排序
 - [ ] 8. 答案生成（prompt 设计，原项目用结构化输出 + CoT）
 - [ ] 9. 端到端串联与冒烟测试
 
-**当前位置：第 3.5 步完成（dev 197 图全部分类、41 张数据图转写），准备开始第 4 步（文本切分，父文档策略）。**
+**当前位置：第 4 步完成（dev 集 4,694 chunks），准备开始第 5 步（嵌入与索引）。**
 （每完成一步，勾选对应项并更新当前位置。）
+
+## 切分阶段结果（第 4 步完成，2026-09-07）
+
+- dev 集 10 份 → `data/parsed/chunked/*.json`：`{metainfo, pages[], chunks[]}`，共
+  **4,694 chunks**（content 3,940 / serialized_table 873 / serialized_image 41）+ 1,145 页父文本
+- 切分策略（原版用 langchain RecursiveCharacterTextSplitter 300/50，我们自实现并强化）：
+  - **标题为硬边界**：一个 content 块不跨章节
+  - 段落贪心合并到 ≤300 token（小段落单独成块上下文太稀，合并自带语境）；
+    只有单段超长才降级按行/词硬切，断口保留 50 token overlap——"结构优先、大小封顶"
+  - 每个 content 块带**标题面包屑前缀**（如 "CHAIRMAN'S STATEMENT > Pension Scheme"），
+    提高块的自含性（表格序列化思想的正文版，零 LLM 成本）
+  - 表/vl 图不切碎：一张序列化表 = 一整块（同原版），一张数据图转写 = 一整块
+- chunk 元数据带 `els: [start, end)`（原内容流元素区间）：PDF 分页是排版单位不是
+  语义单位，第 6 步可用**跨页元素窗口**（而非页）构建父上下文；`pages[]` 同时保留
+  （页级父文档 + 引用锚点）
+- 质量：content 块 tokens p50=162/p95=288/max=335（超 300 仅 3/3,940，拼接开销）；
+  els 单调、无空块；表块最大 5,739 tok（GMREIT 超大表，整块是设计使然）
+- token 计数：tiktoken o200k_base（与原版一致；对 DeepSeek 是近似，仅用于切块）
+- 复跑：`.venv\Scripts\python.exe -m enterprise_rag.processing.text_splitter`
+  （默认 serialized → chunked；--chunk-size/--overlap 可调）
 
 ## 图片序列化阶段结果（第 3.5 步完成，2026-09-07）
 
