@@ -21,7 +21,10 @@ import shutil
 import subprocess
 import sys
 import time
+from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from enterprise_rag.quality import check_pdf_quality
 
 # src/enterprise_rag/parsing/pdf_parser.py → 项目根
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -29,6 +32,22 @@ DATA_DIR = PROJECT_ROOT / "data"
 
 # 每个 PDF 的解析时限（CPU 下大文件可能要几分钟）
 PER_PDF_TIMEOUT = 20 * 60
+QUALITY_REJECTION_MESSAGE = "该文档质量不达标，请检查后重新上传"
+
+
+@dataclass(frozen=True)
+class IngestionResult:
+    """单份 PDF 的解析结果，可直接交给 Dashboard 展示。"""
+
+    source: str
+    status: str
+    message: str
+    error_code: str | None = None
+    quality: dict | None = None
+    output_path: str | None = None
+
+    def as_dict(self) -> dict:
+        return asdict(self)
 
 
 def _sha1(path: Path) -> str:
@@ -164,37 +183,87 @@ def parse_pdf(pdf_path: Path, work_dir: Path, company: str | None = None) -> dic
 
 
 def parse_and_export(pdf_paths: list[Path], out_dir: Path,
-                     work_dir: Path | None = None) -> None:
-    """批量解析并落盘到 out_dir/{stem}.json（已存在的跳过，可断点续跑）。"""
+                     work_dir: Path | None = None,
+                     quality_check: bool = True) -> list[IngestionResult]:
+    """批量解析并落盘到 out_dir/{stem}.json（已存在的跳过，可断点续跑）。
+
+    Args:
+        pdf_paths: PDF 文件列表
+        out_dir: 输出目录
+        work_dir: MinerU 工作目录
+        quality_check: 是否在解析前做质量预检（默认 True）
+    """
     out_dir = Path(out_dir)
     work_dir = Path(work_dir) if work_dir else out_dir.parent / "mineru_raw"
     out_dir.mkdir(parents=True, exist_ok=True)
     lookup = _load_company_lookup()
+    results: list[IngestionResult] = []
 
     for pdf in pdf_paths:
         pdf = Path(pdf)
         out = out_dir / f"{pdf.stem}.json"
         if out.exists():
             print(f"[SKIP] {pdf.name}（已解析）")
+            results.append(IngestionResult(
+                source=str(pdf), status="skipped", message="文档已解析，跳过",
+                output_path=str(out),
+            ))
             continue
+
+        # 质量预检（解析前拦截低质量文档）
+        quality: dict | None = None
+        if quality_check:
+            try:
+                result = check_pdf_quality(pdf)
+            except Exception as exc:  # noqa: BLE001 - 批处理需隔离单文件失败
+                message = f"质量预检失败：{exc}"
+                print(f"[FAIL] {pdf.name}: {message}")
+                results.append(IngestionResult(
+                    source=str(pdf), status="failed", message=message,
+                    error_code="QUALITY_CHECK_FAILED",
+                ))
+                continue
+            quality = result.as_dict()
+            if not result.passed:
+                print(f"[FAIL] {pdf.name}: {result.reason}")
+                print(f"       {QUALITY_REJECTION_MESSAGE}")
+                results.append(IngestionResult(
+                    source=str(pdf), status="rejected",
+                    message=QUALITY_REJECTION_MESSAGE,
+                    error_code="DOCUMENT_QUALITY_REJECTED", quality=quality,
+                ))
+                continue
+
         try:
             report = parse_pdf(pdf, work_dir / pdf.stem, company=lookup.get(pdf.name))
         except Exception as e:  # noqa: BLE001 —— 单个 PDF 失败不中断整批
             print(f"[FAIL] {pdf.name}: {e}")
+            results.append(IngestionResult(
+                source=str(pdf), status="failed", message=f"PDF 解析失败：{e}",
+                error_code="PDF_PARSE_FAILED", quality=quality,
+            ))
             continue
         out.write_text(json.dumps(report, ensure_ascii=False, indent=1), encoding="utf-8")
         m = report["metainfo"]
         print(f"[OK] {pdf.name}: {m['num_pages']}页 {m['num_tables']}表 "
               f"{m['num_elements']}元素 {m['parse_seconds']}s")
+        results.append(IngestionResult(
+            source=str(pdf), status="accepted", message="文档解析成功",
+            quality=quality, output_path=str(out),
+        ))
+
+    return results
 
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(description="解析年报 PDF → data/parsed/docs/*.json")
     ap.add_argument("pdfs", nargs="+", type=Path, help="PDF 文件或目录")
     ap.add_argument("--out", type=Path, default=DATA_DIR / "parsed" / "docs")
+    ap.add_argument("--no-quality-check", action="store_true",
+                    help="跳过质量预检(不推荐)")
     args = ap.parse_args()
 
     paths: list[Path] = []
     for p in args.pdfs:
         paths.extend(sorted(p.glob("*.pdf")) if p.is_dir() else [p])
-    parse_and_export(paths, args.out)
+    parse_and_export(paths, args.out, quality_check=not args.no_quality_check)
