@@ -11,11 +11,14 @@ eval 全量（100 份）数据处理与正式评测未跑——续跑入口见[�
 ## 流水线
 
 ```
-PDF ──► ① MinerU 解析 ──► ② 表格 LLM 序列化 ──► ③ 图表多模态转写
+PDF ──► ⓪ 文本层质量预检 ──► ① MinerU 解析 ──► ② 表格 LLM 序列化 ──► ③ 图表多模态转写
               │                  │                    │
               └──────────────────┴────────────────────┘
                                  ▼
               ④ 结构化切分（标题硬边界 + 面包屑 + els 区间）
+                                 │
+                                 ▼ 可选，默认关闭
+              ④.5 正文 Chunk LLM 清洗与上下文增强
                                  ▼
               ⑤ 索引（bge-m3 × FAISS 精确余弦 + BM25，每文档一索引）
                                  ▼
@@ -28,10 +31,12 @@ PDF ──► ① MinerU 解析 ──► ② 表格 LLM 序列化 ──► ③
 
 | # | 阶段 | 模块 | 技术选型 | dev 实测 |
 |---|------|------|----------|----------|
+| 0 | PDF 质量预检 | `quality/quality_checker.py` | PyMuPDF 前 5 页；有效字符率阈值 80% + 文本密度 | 入口默认开启 |
 | 1 | PDF 解析 | `parsing/pdf_parser.py` | MinerU pipeline 后端（GPU） | 10/10，~293s/份，1164 页 873 表 |
 | 2 | 表格序列化 | `processing/table_serializer.py` | DeepSeek，json_object + pydantic 校验 | 873 表 → 6,262 个上下文独立信息块，¥5 / 8 分钟 |
 | 3 | 图片序列化 | `processing/image_serializer.py` | deepseek-v4-flash-vision-exp 两阶段（先分类后转写） | 197 图，41 张含数据的完成转写，<¥1 |
 | 4 | 文本切分 | `processing/text_splitter.py` | 自实现：标题硬边界 + 段落贪心 ≤300 tok + 标题面包屑 | 4,694 chunks，p95=288 tok |
+| 4.5 | 正文清洗（可选） | `processing/chunk_transformer.py` | LLM 相邻上下文去噪 + 数字守恒校验 + 失败回退 | 默认关闭，按调用量计费 |
 | 5 | 嵌入索引 | `indexing/ingestor.py` | 硅基流动 bge-m3（免费）+ FAISS IndexFlatIP + BM25Okapi | 1.24M token，18 秒，免费 |
 | 6 | 检索 | `retrieval/retriever.py` | 正则路由 + 向量/BM25 双路 min-max 融合 top-20 | dev 5 题路由全对 |
 | 7 | LLM 重排 | `reranking/reranker.py` | DeepSeek 0-1 锚点量表，combined = 0.7×LLM + 0.3×融合分 | batch=10，~¥0.01-0.02/题 |
@@ -54,6 +59,10 @@ PDF ──► ① MinerU 解析 ──► ② 表格 LLM 序列化 ──► ③
 
 **超出原方案的部分**（dev 集上有验证依据）：
 
+- **入口质量门禁**：MinerU 前快速抽取前 5 页文本；有效字符率低于 80% 或完全
+  没有可识别文本时拒绝入库，同时返回可供 Dashboard 使用的结构化状态和提示
+  “该文档质量不达标，请检查后重新上传”。字符密度和文本页比例用于诊断，避免
+  仅凭稀疏封面误拒正常年报
 - **双路召回融合**：原版获奖流水线其实只走向量 top-28、BM25 建了没用（读源码
   纠正的误记）。我们双路各取 top-30，min-max 归一化后 vw=0.6 融合——dev 抽查
   两路 top3 重叠仅 0-1/3（向量补同义词、BM25 补精确数字），互补性实证
@@ -99,10 +108,15 @@ uv pip install -p .venv\Scripts\python.exe --index-url https://download.pytorch.
 # 3) 数据准备：data/raw/dev/ 放 PDF（data/pdf_metadata.csv 有 sha1↔公司名映射）
 $env:MINERU_MODEL_SOURCE='modelscope'
 $py = .venv\Scripts\python.exe
-$py -m enterprise_rag.parsing.pdf_parser data\raw\dev        # ① 解析（断点续跑）
+$py -m enterprise_rag.parsing.pdf_parser data\raw\dev        # ⓪ 预检 + ① 解析（断点续跑）
+# 仅在人工确认必须绕过门禁时使用：末尾加 --no-quality-check
 $py -m enterprise_rag.processing.table_serializer            # ② 表序列化
 $py -m enterprise_rag.processing.image_serializer            # ③ 图序列化
 $py -m enterprise_rag.processing.text_splitter               # ④ 切分
+# 可选：切分后立即清洗正文 Chunk（默认关闭，会产生 LLM 费用）
+$py -m enterprise_rag.processing.text_splitter --transform
+# 或对已有 chunked 产物独立、可续跑地执行
+$py -m enterprise_rag.processing.chunk_transformer
 $py -m enterprise_rag.indexing.ingestor                      # ⑤ 建索引
 
 # 4) 问答与评测
@@ -140,12 +154,14 @@ eval 100 份外推：解析 ~8 小时（GPU）、序列化 ~¥50、索引 ~30 �
 
 ```
 src/enterprise_rag/
+├── quality/quality_checker.py     # ⓪ PDF 文本层质量预检 + 结构化指标
 ├── parsing/pdf_parser.py        # ① MinerU 解析 → data/parsed/docs
-├── processing/                  # ②③④ 序列化/转写/切分
+├── processing/                  # ②③④/④.5 序列化/转写/切分/可选清洗
 │   ├── normalize.py             #    文本规范化（连字断痕、控制字符）
 │   ├── table_serializer.py      #    → data/parsed/serialized
 │   ├── image_serializer.py      #    图片分类 + 含数据图转写
-│   └── text_splitter.py         #    → data/parsed/chunked
+│   ├── text_splitter.py         #    → data/parsed/chunked
+│   └── chunk_transformer.py     #    可选正文 LLM 清洗 → data/parsed/transformed
 ├── indexing/ingestor.py         # ⑤ 嵌入 + FAISS + BM25 → data/indexes
 ├── retrieval/retriever.py       # ⑥ 路由 + 双路融合 + 父文档回溯
 ├── reranking/reranker.py        # ⑦ LLM 重排
