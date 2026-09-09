@@ -230,11 +230,34 @@ def split_doc(doc: dict, chunk_size: int = 300, overlap: int = 50) -> dict:
     return {"metainfo": doc.get("metainfo", {}), "pages": pages, "chunks": all_chunks}
 
 
-def split_all(input_dir: Path, out_dir: Path, chunk_size: int, overlap: int) -> None:
+def split_all(
+    input_dir: Path,
+    out_dir: Path,
+    chunk_size: int,
+    overlap: int,
+    *,
+    transform: bool = False,
+    client=None,
+    model: str | None = None,
+    transform_workers: int = 4,
+) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
+    if transform and (client is None or model is None):
+        from enterprise_rag.processing.chunk_transformer import make_client
+
+        client, model = make_client()
     for in_path in sorted(input_dir.glob("*.json")):
         doc = json.loads(in_path.read_text(encoding="utf-8"))
         result = split_doc(doc, chunk_size, overlap)
+        if transform:
+            from enterprise_rag.processing.chunk_transformer import transform_document
+
+            result = transform_document(
+                result,
+                client=client,
+                model=model,
+                max_workers=transform_workers,
+            )
         (out_dir / in_path.name).write_text(
             json.dumps(result, ensure_ascii=False, indent=1), encoding="utf-8")
         from collections import Counter
@@ -256,8 +279,20 @@ def main() -> None:
     ap.add_argument("--out", type=Path, default=DATA_DIR / "parsed" / "chunked")
     ap.add_argument("--chunk-size", type=int, default=300)
     ap.add_argument("--overlap", type=int, default=50)
+    ap.add_argument(
+        "--transform", action="store_true",
+        help="显式启用正文 Chunk LLM 清洗（默认关闭，会产生 API 费用）",
+    )
+    ap.add_argument("--transform-workers", type=int, default=4)
     args = ap.parse_args()
-    split_all(args.input, args.out, args.chunk_size, args.overlap)
+    split_all(
+        args.input,
+        args.out,
+        args.chunk_size,
+        args.overlap,
+        transform=args.transform,
+        transform_workers=args.transform_workers,
+    )
 
 
 if __name__ == "__main__":

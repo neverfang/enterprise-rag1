@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from types import SimpleNamespace
 
 from enterprise_rag.processing.chunk_transformer import (
     extract_numeric_tokens,
+    transform_all,
     transform_document,
     validate_transformed_text,
 )
@@ -155,3 +157,31 @@ def test_prompt_contains_bounded_adjacent_prose_context() -> None:
     assert "Previous context." in current_prompt
     assert "Current text." in current_prompt
     assert "Next context." in current_prompt
+
+
+def test_transform_all_writes_atomically_and_resumes(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    input_dir.mkdir()
+    (input_dir / "sample.json").write_text(
+        json.dumps({"metainfo": {}, "chunks": [_content(0, "Original prose.")]}),
+        encoding="utf-8",
+    )
+    first_client = FakeClient(
+        [json.dumps({"transformed_text": "Clean prose."})]
+    )
+
+    paths = transform_all(
+        input_dir, output_dir, client=first_client, model="fake", max_workers=1
+    )
+
+    assert paths == [output_dir / "sample.json"]
+    assert not (output_dir / "sample.json.tmp").exists()
+    saved = json.loads(paths[0].read_text(encoding="utf-8"))
+    assert saved["chunks"][0]["text"] == "Clean prose."
+
+    second_client = FakeClient([])
+    transform_all(
+        input_dir, output_dir, client=second_client, model="fake", max_workers=1
+    )
+    assert second_client.chat.completions.calls == []

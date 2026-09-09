@@ -2,16 +2,23 @@
 
 from __future__ import annotations
 
+import argparse
 import copy
 import json
+import os
 import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import tiktoken
+from dotenv import load_dotenv
+from openai import OpenAI
 
 _ENC = tiktoken.get_encoding("o200k_base")
 _NUMBER = re.compile(r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?%?")
 _CONTEXT_LIMIT = 800
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_DIR = PROJECT_ROOT / "data"
 
 SYSTEM_PROMPT = """You clean prose chunks extracted from an annual-report PDF.
 Return valid JSON with exactly one key: {"transformed_text": "..."}.
@@ -170,3 +177,83 @@ def transform_document(
         "statuses": counts,
     }
     return result
+
+
+def make_client() -> tuple[OpenAI, str]:
+    """读取与其他处理阶段一致的 OpenAI 兼容配置。"""
+    load_dotenv(PROJECT_ROOT / ".env")
+    api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY")
+    if not api_key:
+        raise RuntimeError("启用 Chunk Transform 需要 DEEPSEEK_API_KEY 或 LLM_API_KEY")
+    base_url = os.environ.get("LLM_BASE_URL", "https://api.deepseek.com")
+    model = os.environ.get("LLM_MODEL", "deepseek-chat")
+    return OpenAI(api_key=api_key, base_url=base_url, max_retries=0), model
+
+
+def transform_all(
+    input_dir: Path,
+    output_dir: Path,
+    *,
+    client,
+    model: str,
+    max_workers: int = 4,
+    retries: int = 3,
+    force: bool = False,
+) -> list[Path]:
+    """转换目录内所有 chunked JSON，并以临时文件原子落盘。"""
+    input_dir = Path(input_dir)
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    for input_path in sorted(input_dir.glob("*.json")):
+        output_path = output_dir / input_path.name
+        base_path = input_path if force or not output_path.exists() else output_path
+        doc = json.loads(base_path.read_text(encoding="utf-8"))
+        transformed = transform_document(
+            doc,
+            client=client,
+            model=model,
+            max_workers=max_workers,
+            retries=retries,
+        )
+        temporary_path = output_path.with_suffix(output_path.suffix + ".tmp")
+        temporary_path.write_text(
+            json.dumps(transformed, ensure_ascii=False, indent=1), encoding="utf-8"
+        )
+        temporary_path.replace(output_path)
+        written.append(output_path)
+    return written
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(
+        description="可选阶段：对 Splitter 产出的正文 Chunk 做 LLM 清洗与增强"
+    )
+    parser.add_argument(
+        "input", type=Path, nargs="?", default=DATA_DIR / "parsed" / "chunked"
+    )
+    parser.add_argument(
+        "--out", type=Path, default=DATA_DIR / "parsed" / "transformed"
+    )
+    parser.add_argument("--workers", type=int, default=4)
+    parser.add_argument("--retries", type=int, default=3)
+    parser.add_argument(
+        "--force", action="store_true", help="忽略已有输出，从原始 chunked 文件重做"
+    )
+    args = parser.parse_args()
+
+    client, model = make_client()
+    paths = transform_all(
+        args.input,
+        args.out,
+        client=client,
+        model=model,
+        max_workers=args.workers,
+        retries=args.retries,
+        force=args.force,
+    )
+    print(f"# Chunk Transform 完成：{len(paths)} 份文档，模型 {model}")
+
+
+if __name__ == "__main__":
+    main()
