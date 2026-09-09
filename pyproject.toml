@@ -14,6 +14,7 @@ dependencies = [
     "faiss-cpu>=1.8",
     "rank-bm25>=0.2",
     "numpy>=1.26",
+    "pymupdf>=1.24",
 ]
 
 [project.optional-dependencies]
