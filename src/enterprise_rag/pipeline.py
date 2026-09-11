@@ -15,6 +15,9 @@ Generator。对应原项目 questions_processing.py 的 process_questions_list �
   用来跳过未索引公司）
 - references 输出 [{pdf_sha1, page_index}]（sha1 来自 pdf_metadata.csv），
   评测引用有效性用
+- contexts 输出生成端实际使用的父文本列表（比较题为各家合并），供
+  eval_ragas.py 做 faithfulness / context precision 等指标（answers_run*.json
+  不进 git，体积增大无妨）
 
 用法：
     python -m enterprise_rag.pipeline <questions.json> \
@@ -90,6 +93,7 @@ class Pipeline:
         ans["references"] = [
             {"pdf_sha1": self._sha1.get(doc_id, ""), "page_index": p}
             for p in ans.get("relevant_pages", [])]
+        ans["contexts"] = [p["text"] for p in kept]  # 生成端实际用的父文本（RAGAS 用）
         return ans
 
     # ---------- 比较题三步 ----------
@@ -136,6 +140,8 @@ class Pipeline:
                 {"pdf_sha1": self._sha1.get(d, ""), "page_index": p}
                 for d, a in sub_answers.items()
                 for p in a.get("relevant_pages", [])],
+            "contexts": [t for a in sub_answers.values()
+                         for t in a.get("contexts", [])],  # 各家父文本合并（RAGAS 用）
         }
 
     # ---------- 题目入口 ----------
@@ -145,7 +151,7 @@ class Pipeline:
         if not doc_ids:
             return {"final_answer": "N/A",
                     "reasoning_summary": "路由失败：未匹配到已建索引的公司",
-                    "relevant_pages": [], "references": []}
+                    "relevant_pages": [], "references": [], "contexts": []}
         if len(doc_ids) == 1:
             return self._single(doc_ids[0], question, kind)
         return self._comparative(question, doc_ids)

@@ -19,6 +19,15 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
+# ragas 0.4 的 evaluate() 走经典 LangchainLLM 路径（collections 新指标不经过
+# evaluate），须锁 langchain 0.3 生态：langchain-community>=0.4 已移除其 import
+metrics = [
+    "ragas>=0.4,<1.0",
+    "langchain<0.4",
+    "langchain-core<1.0",
+    "langchain-community<0.4",
+    "langchain-openai<0.4",
+]
 
 [build-system]
 requires = ["hatchling"]
