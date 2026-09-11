@@ -58,6 +58,8 @@ def _write_doc_with_table(input_dir: Path) -> None:
         "content": [
             {"page": 1, "type": "paragraph", "text": "Intro paragraph.", "level": 0},
             {"page": 1, "type": "table", "table_id": "t0", "text": "fallback text"},
+            # 空占位表：无 caption/html/text，序列化信息块为空（MinerU 实测存在）
+            {"page": 1, "type": "table", "table_id": "t1", "text": ""},
         ],
         "tables": [
             {
@@ -72,7 +74,18 @@ def _write_doc_with_table(input_dir: Path) -> None:
                         {"information_block": "Revenue for 2022 is 100 thousand."}
                     ],
                 },
-            }
+            },
+            {
+                "id": "t1",
+                "page": 1,
+                "html": "",
+                "caption": "",
+                "serialized": {
+                    "subject_core_entities_list": [],
+                    "relevant_headers_list": [],
+                    "information_blocks": [],
+                },
+            },
         ],
     }
     (input_dir / "sample.json").write_text(json.dumps(doc), encoding="utf-8")
@@ -92,6 +105,9 @@ def test_split_all_uses_serialized_blocks_by_default(tmp_path: Path) -> None:
     result = json.loads((output_dir / "sample.json").read_text(encoding="utf-8"))
     assert "Revenue for 2022 is 100 thousand." in _table_chunk(result)["text"]
     assert "<table>" not in _table_chunk(result)["text"]
+    # 空占位表不建块（防空块稀释索引、卡 ingestor 的非空校验）
+    assert len([c for c in result["chunks"] if c["type"] == "serialized_table"]) == 1
+    assert all(c["text"].strip() for c in result["chunks"])
 
 
 def test_split_all_table_source_html_keeps_raw_html(tmp_path: Path) -> None:

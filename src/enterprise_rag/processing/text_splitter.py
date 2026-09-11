@@ -172,22 +172,25 @@ def split_doc(
             if table_source == "html":
                 # 消融对照：表格保持原始 HTML（未语义化）；无 html 才兜底 caption
                 body = ((f"Table: {t['caption']}\n" if (t or {}).get("caption") else "")
-                        + ((t or {}).get("html") or text or "[table]"))
+                        + ((t or {}).get("html") or text or ""))
             else:
                 ser = (t or {}).get("serialized")
-                if ser:
+                if ser and ser.get("information_blocks"):
                     blocks = "\n".join(b["information_block"]
                                        for b in ser["information_blocks"])
                     body = ((f"Table: {t['caption']}\n" if t.get("caption") else "")
                             + blocks)
                 else:  # 未序列化的表（dev 集为 0）：caption 兜底，防整表信息丢失
-                    body = text or "[table]"
-                    print(f"  [WARN] 表 {e.get('table_id')} 无 serialized，仅 caption 入块")
-            unit_chunks.append({
-                "type": "serialized_table", "page": page, "text": body,
-                "table_id": e.get("table_id"), "els": [idx, idx + 1],
-            })
-            page_parts.setdefault(page, []).append(body)
+                    body = text or ""
+                    if ser:
+                        # 序列化过但信息块为空（如 MinerU 空占位表）
+                        print(f"  [WARN] 表 {e.get('table_id')} 序列化信息块为空，仅 caption 入块")
+            if body.strip():  # 空表（无 caption/html/信息块）不建块，防空块稀释索引
+                unit_chunks.append({
+                    "type": "serialized_table", "page": page, "text": body,
+                    "table_id": e.get("table_id"), "els": [idx, idx + 1],
+                })
+                page_parts.setdefault(page, []).append(body)
             continue
         if etype == "picture":
             vl = e.get("vl") or {}
