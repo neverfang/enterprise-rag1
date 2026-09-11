@@ -51,6 +51,64 @@ def test_split_all_does_not_transform_by_default(tmp_path: Path) -> None:
     assert "chunk_transform" not in result["metainfo"]
 
 
+def _write_doc_with_table(input_dir: Path) -> None:
+    input_dir.mkdir()
+    doc = {
+        "metainfo": {"doc_id": "sample"},
+        "content": [
+            {"page": 1, "type": "paragraph", "text": "Intro paragraph.", "level": 0},
+            {"page": 1, "type": "table", "table_id": "t0", "text": "fallback text"},
+        ],
+        "tables": [
+            {
+                "id": "t0",
+                "page": 1,
+                "html": "<table><tr><td>100</td></tr></table>",
+                "caption": "Revenue",
+                "serialized": {
+                    "subject_core_entities_list": ["Revenue"],
+                    "relevant_headers_list": ["2022"],
+                    "information_blocks": [
+                        {"information_block": "Revenue for 2022 is 100 thousand."}
+                    ],
+                },
+            }
+        ],
+    }
+    (input_dir / "sample.json").write_text(json.dumps(doc), encoding="utf-8")
+
+
+def _table_chunk(result: dict) -> dict:
+    return next(c for c in result["chunks"] if c["type"] == "serialized_table")
+
+
+def test_split_all_uses_serialized_blocks_by_default(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    _write_doc_with_table(input_dir)
+
+    split_all(input_dir, output_dir, 300, 50)
+
+    result = json.loads((output_dir / "sample.json").read_text(encoding="utf-8"))
+    assert "Revenue for 2022 is 100 thousand." in _table_chunk(result)["text"]
+    assert "<table>" not in _table_chunk(result)["text"]
+
+
+def test_split_all_table_source_html_keeps_raw_html(tmp_path: Path) -> None:
+    input_dir = tmp_path / "input"
+    output_dir = tmp_path / "output"
+    _write_doc_with_table(input_dir)
+
+    split_all(input_dir, output_dir, 300, 50, table_source="html")
+
+    result = json.loads((output_dir / "sample.json").read_text(encoding="utf-8"))
+    body = _table_chunk(result)["text"]
+    assert "Table: Revenue" in body
+    assert "<table><tr><td>100</td></tr></table>" in body
+    assert "Revenue for 2022" not in body  # 序列化信息块不混入
+    assert "<table>" in result["pages"][0]["text"]  # 页父文本同步用原始 HTML
+
+
 def test_split_all_transforms_only_when_explicitly_enabled(tmp_path: Path) -> None:
     input_dir = tmp_path / "input"
     output_dir = tmp_path / "output"

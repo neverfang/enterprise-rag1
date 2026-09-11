@@ -136,8 +136,19 @@ def _pack_prose(atoms: list[dict], budget: int, overlap: int) -> list[list[dict]
     return groups
 
 
-def split_doc(doc: dict, chunk_size: int = 300, overlap: int = 50) -> dict:
-    """一份 serialized 文档 -> {metainfo, pages, chunks}。"""
+def split_doc(
+    doc: dict,
+    chunk_size: int = 300,
+    overlap: int = 50,
+    *,
+    table_source: str = "serialized",
+) -> dict:
+    """一份 serialized 文档 -> {metainfo, pages, chunks}。
+
+    table_source：表格块内容来源——
+    - "serialized"（默认）：LLM 序列化的 information_blocks（正常流水线）
+    - "html"：MinerU 原始表格 HTML（消融对照：表格未语义化，其余不变）
+    """
     els = doc.get("content", [])
     tables = {t["id"]: t for t in doc.get("tables", [])}
     stack = _HeadingStack()
@@ -158,15 +169,20 @@ def split_doc(doc: dict, chunk_size: int = 300, overlap: int = 50) -> dict:
             continue
         if etype == "table":
             t = tables.get(e.get("table_id") or "")
-            ser = (t or {}).get("serialized")
-            if ser:
-                blocks = "\n".join(b["information_block"]
-                                   for b in ser["information_blocks"])
-                body = ((f"Table: {t['caption']}\n" if t.get("caption") else "")
-                        + blocks)
-            else:  # 未序列化的表（dev 集为 0）：caption 兜底，防整表信息丢失
-                body = text or "[table]"
-                print(f"  [WARN] 表 {e.get('table_id')} 无 serialized，仅 caption 入块")
+            if table_source == "html":
+                # 消融对照：表格保持原始 HTML（未语义化）；无 html 才兜底 caption
+                body = ((f"Table: {t['caption']}\n" if (t or {}).get("caption") else "")
+                        + ((t or {}).get("html") or text or "[table]"))
+            else:
+                ser = (t or {}).get("serialized")
+                if ser:
+                    blocks = "\n".join(b["information_block"]
+                                       for b in ser["information_blocks"])
+                    body = ((f"Table: {t['caption']}\n" if t.get("caption") else "")
+                            + blocks)
+                else:  # 未序列化的表（dev 集为 0）：caption 兜底，防整表信息丢失
+                    body = text or "[table]"
+                    print(f"  [WARN] 表 {e.get('table_id')} 无 serialized，仅 caption 入块")
             unit_chunks.append({
                 "type": "serialized_table", "page": page, "text": body,
                 "table_id": e.get("table_id"), "els": [idx, idx + 1],
@@ -240,6 +256,7 @@ def split_all(
     client=None,
     model: str | None = None,
     transform_workers: int = 4,
+    table_source: str = "serialized",
 ) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     if transform and (client is None or model is None):
@@ -248,7 +265,7 @@ def split_all(
         client, model = make_client()
     for in_path in sorted(input_dir.glob("*.json")):
         doc = json.loads(in_path.read_text(encoding="utf-8"))
-        result = split_doc(doc, chunk_size, overlap)
+        result = split_doc(doc, chunk_size, overlap, table_source=table_source)
         if transform:
             from enterprise_rag.processing.chunk_transformer import transform_document
 
@@ -284,6 +301,11 @@ def main() -> None:
         help="显式启用正文 Chunk LLM 清洗（默认关闭，会产生 API 费用）",
     )
     ap.add_argument("--transform-workers", type=int, default=4)
+    ap.add_argument(
+        "--table-source", choices=["serialized", "html"], default="serialized",
+        help="表格块内容：serialized=LLM 序列化信息块（默认）；html=原始表格 HTML"
+             "（消融对照，产出可配合 --out data/parsed/chunked_raw_table）",
+    )
     args = ap.parse_args()
     split_all(
         args.input,
@@ -292,6 +314,7 @@ def main() -> None:
         args.overlap,
         transform=args.transform,
         transform_workers=args.transform_workers,
+        table_source=args.table_source,
     )
 
 
